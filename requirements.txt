@@ -1,0 +1,5 @@
+rich
+click
+PyQt5
+GitPython
+markdown
