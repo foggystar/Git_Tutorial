@@ -9,20 +9,21 @@
 ## 安装说明
 
 1. 确保你的系统上已安装 Git 和 Python 3.x。
-2. 克隆本仓库到本地：
+2. Fork本仓库
+3. 克隆本仓库到本地：
    ```
    git clone https://github.com/YOUR_USERNAME/git-tutorial-interactive.git
    ```
-3. 进入项目目录：
+4. 进入项目目录：
    ```
    cd Git_Tutorial
    ```
-4. 安装 uv 工具（如果尚未安装）：
+5. 安装 uv 工具（如果尚未安装）：
    ```
    curl -fsSL https://fnm.vercel.app/install | bash   # 安装 fnm (可选)
    pip install uv                                     # 使用现有的 pip 安装 uv
    ```
-5. 使用 uv 创建虚拟环境并安装依赖：
+6. 使用 uv 创建虚拟环境并安装依赖：
    ```
    uv venv .venv                                      # 创建虚拟环境
    source .venv/bin/activate                          # Linux/macOS

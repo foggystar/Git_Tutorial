@@ -95,3 +95,64 @@ def install_dependencies_with_uv():
     except Exception as e:
         print(f"安装依赖失败: {e}")
         return False
+
+def reset_workspace(workspace_path):
+    """重置workspace目录，清除所有文件和.git目录，并重新初始化Git仓库"""
+    import os
+    import shutil
+    import subprocess
+    
+    try:
+        # 确保workspace目录存在
+        if not os.path.exists(workspace_path):
+            os.makedirs(workspace_path, exist_ok=True)
+            print(f"创建workspace目录: {workspace_path}")
+            
+        # 首先尝试强制删除所有内容，包括.git目录
+        for item in os.listdir(workspace_path):
+            item_path = os.path.join(workspace_path, item)
+            try:
+                if os.path.isfile(item_path):
+                    os.remove(item_path)
+                    print(f"已删除文件: {item}")
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path, ignore_errors=True)
+                    print(f"已删除目录: {item}")
+            except Exception as e:
+                print(f"删除 {item} 时出错: {e}")
+                
+        # # 再次特别检查.git目录是否还存在，如果存在则尝试强制删除
+        # git_dir = os.path.join(workspace_path, ".git")
+        # if os.path.exists(git_dir):
+        #     try:
+        #         # 使用更强制的方式删除
+        #         if os.name == 'nt':  # Windows
+        #             subprocess.run(f"rmdir /S /Q \"{git_dir}\"", shell=True, check=True)
+        #         else:  # Linux/Mac
+        #             subprocess.run(f"rm -rf \"{git_dir}\"", shell=True, check=True)
+        #         print("已强制删除.git目录")
+        #     except Exception as e:
+        #         print(f"强制删除.git目录时出错: {e}")
+                
+        # # 再次检查.git目录是否确实被删除
+        # if os.path.exists(git_dir):
+        #     print("警告: 无法删除.git目录，这可能会导致问题")
+        # else:
+        #     print("已确认.git目录已被成功删除")
+                
+        # print("已清空workspace目录")
+        
+        # # 确保目录为空后，重新初始化Git仓库
+        # subprocess.run(["git", "init"], cwd=workspace_path, check=True)
+        print("已重新初始化Git仓库")
+        
+        # 创建一个简单的README.md文件
+        readme_content = "# Git教程练习项目\n\n这是一个用于Git教程练习的仓库。\n"
+        with open(os.path.join(workspace_path, "README.md"), "w") as f:
+            f.write(readme_content)
+        print("已创建README.md文件")
+        
+        return True
+    except Exception as e:
+        print(f"重置workspace失败: {e}")
+        return False

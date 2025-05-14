@@ -103,58 +103,98 @@ class GitRepoViewer(QWidget):
                     # 强制重新加载
                     self.git_repo = git.Repo(self.workspace_path)
                     
+                    # 清空状态文本并更新
+                    self.status_text.clear()
+                    
                     status = []
                     
+                    # 检查是否是空仓库（没有提交）
+                    try:
+                        commits_exist = bool(list(self.git_repo.iter_commits('HEAD', max_count=1)))
+                    except (git.exc.GitCommandError, ValueError):
+                        commits_exist = False
+                        
                     # 获取当前分支
                     try:
                         branch = self.git_repo.active_branch.name
                         status.append(f"当前分支: {branch}")
-                    except TypeError:
-                        status.append("HEAD处于分离状态（Detached HEAD）")
+                    except (TypeError, ValueError):
+                        status.append("HEAD处于分离状态或这是一个新仓库")
                     
                     # 获取最后一次提交
-                    try:
-                        commits = list(self.git_repo.iter_commits('HEAD', max_count=1))
-                        if commits:
-                            commit = commits[0]
-                            status.append(f"最后提交: {commit.hexsha[:7]} - {commit.message.strip()}")
-                    except:
-                        status.append("尚无提交")
+                    if commits_exist:
+                        try:
+                            commits = list(self.git_repo.iter_commits('HEAD', max_count=1))
+                            if commits:
+                                commit = commits[0]
+                                status.append(f"最后提交: {commit.hexsha[:7]} - {commit.message.strip()}")
+                        except:
+                            status.append("无法获取提交信息")
+                    else:
+                        status.append("这是一个新的空仓库，尚无提交")
+                        status.append("提示：请创建一些文件并执行第一次提交")
                     
                     # 本地更改
                     status.append("\n--- 本地更改 ---")
-                    changed_files = [item.a_path for item in self.git_repo.index.diff(None)]
-                    if changed_files:
-                        status.append("修改但未暂存的文件:")
-                        for f in changed_files:
-                            status.append(f"  - {f}")
-                    else:
-                        status.append("工作区干净，没有修改")
+                    try:
+                        changed_files = [item.a_path for item in self.git_repo.index.diff(None)]
+                        if changed_files:
+                            status.append("修改但未暂存的文件:")
+                            for f in changed_files:
+                                status.append(f"  - {f}")
+                        else:
+                            status.append("工作区干净，没有修改")
+                    except (git.exc.GitCommandError, ValueError):
+                        status.append("无法获取工作区状态")
                     
                     # 暂存区
                     status.append("\n--- 暂存区 ---")
-                    staged_files = [item.a_path for item in self.git_repo.index.diff('HEAD')]
-                    if staged_files:
-                        status.append("已暂存的更改:")
-                        for f in staged_files:
-                            status.append(f"  + {f}")
+                    if commits_exist:
+                        try:
+                            staged_files = [item.a_path for item in self.git_repo.index.diff('HEAD')]
+                            if staged_files:
+                                status.append("已暂存的更改:")
+                                for f in staged_files:
+                                    status.append(f"  + {f}")
+                            else:
+                                status.append("暂存区为空")
+                        except (git.exc.GitCommandError, ValueError):
+                            status.append("无法获取暂存区状态")
                     else:
-                        status.append("暂存区为空")
+                        try:
+                            # 对于空仓库，检查索引中的文件
+                            staged_entries = self.git_repo.index.entries
+                            if staged_entries:
+                                status.append("已暂存的文件:")
+                                for entry in staged_entries:
+                                    path = entry[0][0].decode() if isinstance(entry[0][0], bytes) else entry[0][0]
+                                    status.append(f"  + {path}")
+                            else:
+                                status.append("暂存区为空")
+                        except:
+                            status.append("暂存区为空")
                     
                     # 未跟踪文件
                     status.append("\n--- 未跟踪文件 ---")
-                    untracked = self.git_repo.untracked_files
-                    if untracked:
-                        status.append("未跟踪的文件:")
-                        for f in untracked:
-                            status.append(f"  ? {f}")
-                    else:
-                        status.append("没有未跟踪的文件")
+                    try:
+                        untracked = self.git_repo.untracked_files
+                        if untracked:
+                            status.append("未跟踪的文件:")
+                            for f in untracked:
+                                status.append(f"  ? {f}")
+                        else:
+                            status.append("没有未跟踪的文件")
+                    except Exception as e:
+                        status.append(f"无法获取未跟踪文件: {str(e)}")
                     
                     self.status_text.setText("\n".join(status))
                     
                 except Exception as e:
                     self.status_text.setText(f"更新Git状态时出错: {str(e)}")
+                    # 提供更具体的错误信息和解决建议
+                    if "Ref 'HEAD' did not resolve to an object" in str(e):
+                        self.status_text.append("\n\n这是一个新初始化的空仓库，尚未有任何提交。")
+                        self.status_text.append("请创建一些文件，使用git add添加它们，然后执行git commit创建第一个提交。")
             else:
                 self.status_text.setText("当前目录不是Git仓库。运行 git init 来初始化它。")
                 self.git_repo = None
@@ -196,7 +236,10 @@ class CommandGuide(QWidget):
             ("add_files", "添加文件"),
             ("commit", "提交"),
             ("branch", "分支"),
-            ("merge", "合并")
+            ("merge", "合并"),
+            ("remote", "远程"),
+            ("fetch_pull", "获取/拉取"),
+            ("push", "推送")
         ]
         
         for step_id, label in steps:
@@ -207,20 +250,20 @@ class CommandGuide(QWidget):
             
         layout.addLayout(steps_layout)
         
-        # 当前步骤指南区域
-        guide_group = QGroupBox("步骤指南")
-        guide_layout = QVBoxLayout()
+        # 创建标签页控件
+        self.tab_widget = QTabWidget()
         
+        # 创建"步骤指南"标签页
+        guide_tab = QWidget()
+        guide_layout = QVBoxLayout()
         self.guide_text = QTextEdit()
         self.guide_text.setReadOnly(True)
         guide_layout.addWidget(self.guide_text)
-        guide_group.setLayout(guide_layout)
-        layout.addWidget(guide_group)
+        guide_tab.setLayout(guide_layout)
         
-        # 命令示例区域
-        cmd_group = QGroupBox("在您的终端中执行")
+        # 创建"在您的终端中执行"标签页
+        cmd_tab = QWidget()
         cmd_layout = QVBoxLayout()
-        
         self.cmd_example = QTextEdit()
         self.cmd_example.setReadOnly(True)
         # 设置等宽字体和背景色，模拟终端
@@ -231,13 +274,18 @@ class CommandGuide(QWidget):
         palette.setColor(QPalette.Base, QColor(30, 30, 30))
         palette.setColor(QPalette.Text, QColor(220, 220, 220))
         self.cmd_example.setPalette(palette)
-        
         cmd_layout.addWidget(self.cmd_example)
-        cmd_group.setLayout(cmd_layout)
-        layout.addWidget(cmd_group)
+        cmd_tab.setLayout(cmd_layout)
+        
+        # 添加标签页到标签页控件
+        self.tab_widget.addTab(guide_tab, "步骤指南")
+        self.tab_widget.addTab(cmd_tab, "在您的终端中执行")
+        
+        # 将标签页控件添加到主布局
+        layout.addWidget(self.tab_widget)
         
         # 提示和帮助区域
-        tip_label = QLabel("提示: 在您自己的终端窗口中执行上述命令，然后观察右侧的Git仓库状态变化")
+        tip_label = QLabel("提示: 在您自己的终端窗口中执行命令，然后观察右侧的Git仓库状态变化")
         tip_label.setWordWrap(True)
         layout.addWidget(tip_label)
         
@@ -431,7 +479,102 @@ git branch -d feature-1
 # 再次查看分支列表:
 git branch
                 """
-            }
+            },
+            "remote": {
+                "guide": """
+<h2>添加远程仓库</h2>
+
+<p>远程仓库(remote repository)允许您与他人协作。GitHub、GitLab和Bitbucket等平台提供了托管远程Git仓库的服务。</p>
+
+<p>添加远程仓库是将本地仓库与远程仓库关联的过程。通常，我们使用"origin"作为主要远程仓库的名称。</p>
+
+<p>本节将指导您如何添加、查看和管理远程仓库。完成这些步骤后，您的本地仓库将与远程仓库建立连接。</p>
+                """,
+                "commands": """
+# 查看当前配置的远程仓库(如果有):
+git remote -v
+
+# 添加远程仓库(用您自己的GitHub/GitLab仓库URL替换下面的URL):
+git remote add origin https://github.com/用户名/仓库名.git
+
+# 如果您没有远程仓库，可在GitHub/GitLab上创建一个新仓库后再执行上面的命令
+
+# 查看添加后的远程仓库:
+git remote -v
+
+# 查看远程仓库的详细信息:
+git remote show origin
+                """
+            },
+            "fetch_pull": {
+                "guide": """
+<h2>获取和拉取远程更改</h2>
+
+<p>与远程仓库协作时，您需要获取其他人的更改。Git提供了两个主要命令：<code>fetch</code>和<code>pull</code>。</p>
+
+<p><strong>git fetch</strong> - 从远程仓库下载内容，但不合并到当前分支。这允许您查看远程的更改而不修改本地工作区。</p>
+
+<p><strong>git pull</strong> - 下载并合并远程更改到当前分支。它相当于<code>git fetch</code>后跟<code>git merge</code>。</p>
+
+<p>这些命令对于团队协作和保持项目同步至关重要。</p>
+                """,
+                "commands": """
+# 确保您已添加远程仓库
+
+# 获取远程仓库的所有信息，但不合并:
+git fetch origin
+
+# 查看远程分支:
+git branch -r
+
+# 查看所有分支(本地和远程):
+git branch -a
+
+# 拉取远程更改并合并到当前分支:
+git pull origin main
+
+# 如果您只想要获取某个特定分支的更新:
+git fetch origin 分支名
+
+# 查看远程分支与本地分支的差异:
+git log HEAD..origin/main --oneline
+                """
+            },
+            "push": {
+                "guide": """
+<h2>推送更改到远程仓库</h2>
+
+<p>完成本地更改后，您可以使用<code>git push</code>将这些更改推送到远程仓库，与团队成员共享您的工作。</p>
+
+<p>推送前，最好先拉取最新的远程更改，以避免可能的冲突。</p>
+
+<p>首次推送到新创建的远程分支时，您需要设置上游(upstream)关联，这样以后可以简化命令。</p>
+
+<p>以下步骤将指导您如何安全地推送更改到远程仓库。</p>
+                """,
+                "commands": """
+# 确保您有要推送的更改(创建新文件或修改现有文件)
+echo "这是要推送到远程的新内容" > push_demo.txt
+git add push_demo.txt
+git commit -m "添加要推送的演示文件"
+
+# 推送到远程仓库:
+git push origin main
+
+# 首次推送新分支并设置上游关联:
+git checkout -b feature-remote
+echo "远程分支上的内容" > remote_feature.txt
+git add remote_feature.txt
+git commit -m "在新分支上添加文件"
+git push -u origin feature-remote
+
+# 设置上游关联后，后续可以简化推送命令:
+# git push
+
+# 查看推送历史:
+git log --oneline
+                """
+            },
         }
         
         # 更新界面
@@ -593,6 +736,10 @@ class GitTutorialApp(QMainWindow):
         check_action = file_menu.addAction('检查环境')
         check_action.triggered.connect(self.check_environment)
         
+        # 添加重置选项
+        reset_action = file_menu.addAction('重置Workspace')
+        reset_action.triggered.connect(self.reset_workspace)
+        
         file_menu.addSeparator()
         
         exit_action = file_menu.addAction('退出')
@@ -606,6 +753,9 @@ class GitTutorialApp(QMainWindow):
         
         git_help_action = help_menu.addAction('Git命令参考')
         git_help_action.triggered.connect(self.show_git_help)
+        
+        remote_reset_help_action = help_menu.addAction('如何重置远程仓库')
+        remote_reset_help_action.triggered.connect(self.show_remote_reset_help)
         
         help_menu.addSeparator()
         
@@ -624,6 +774,37 @@ class GitTutorialApp(QMainWindow):
                          "Git已正确安装。\n\n"
                          "请确保您已经Fork并Clone了教程仓库，"
                          "并在自己的终端中操作。")
+    
+    def reset_workspace(self):
+        """重置workspace目录"""
+        from utils import reset_workspace
+        
+        # 显示确认对话框
+        reply = QMessageBox.question(self, '确认重置', 
+                            '这将删除workspace目录中的所有文件和.git目录，并重新初始化一个空的Git仓库。\n\n'
+                            '如果您有任何未保存的更改，它们将会丢失。\n\n'
+                            '您确定要继续吗？',
+                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                            
+        if reply == QMessageBox.Yes:
+            # 执行重置
+            success = reset_workspace(self.workspace_dir)
+            
+            if success:
+                # 更新仓库观察器
+                self.repo_viewer.update_repo_status()
+                
+                QMessageBox.information(self, "重置完成", 
+                                "workspace目录已重置。\n\n"
+                                "已创建一个新的空Git仓库，并添加了README.md文件。\n\n"
+                                "如果您之前有远程仓库关联，需要重新添加。\n\n"
+                                "注意：如果遇到权限问题，请尝试关闭所有可能使用workspace目录的程序，"
+                                "然后再试一次。")
+            else:
+                QMessageBox.warning(self, "重置失败", 
+                              "重置workspace目录时出错。\n"
+                              "请查看控制台输出了解详细信息。\n\n"
+                              "如果问题与权限有关，请尝试手动删除workspace/.git目录。")
     
     def show_terminal_help(self):
         """显示如何打开终端的帮助"""
@@ -648,6 +829,27 @@ class GitTutorialApp(QMainWindow):
                          "- git checkout <分支>: 切换分支\n"
                          "- git merge <分支>: 合并分支\n\n"
                          "更多命令请参考: https://git-scm.com/docs")
+                         
+    def show_remote_reset_help(self):
+        """显示如何重置远程仓库的帮助"""
+        QMessageBox.information(self, "如何重置远程仓库", 
+                         "重置远程仓库关联的步骤：\n\n"
+                         "1. 查看当前远程仓库：\n   git remote -v\n\n"
+                         "2. 移除现有远程仓库关联：\n   git remote remove origin\n\n"
+                         "3. 添加新的远程仓库：\n   git remote add origin <新仓库URL>\n\n"
+                         "4. 验证远程仓库已更新：\n   git remote -v\n\n"
+                         "注意：如果您想完全重置本地和远程关联，请先使用菜单中的"
+                         "\"重置Workspace\"选项，然后再添加新的远程仓库。")
+        
+    def show_remote_reset_help(self):
+        """显示如何重置远程仓库的帮助"""
+        QMessageBox.information(self, "如何重置远程仓库", 
+                         "要重置远程仓库，您可以按照以下步骤操作：\n\n"
+                         "1. 删除远程仓库中的所有分支：\n"
+                         "   - git push origin --delete <branch_name>\n\n"
+                         "2. 强制推送本地分支覆盖远程仓库：\n"
+                         "   - git push origin <branch_name> --force\n\n"
+                         "请注意，强制推送可能会导致数据丢失，请谨慎操作。")
         
     def show_about(self):
         """显示关于对话框"""
