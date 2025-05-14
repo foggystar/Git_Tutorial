@@ -10,9 +10,9 @@
 
 1. 确保你的系统上已安装 Git 和 Python 3.x。
 2. Fork本仓库
-3. 克隆本仓库到本地：
+3. 克隆Fork的仓库到本地：
    ```
-   git clone https://github.com/YOUR_USERNAME/git-tutorial-interactive.git
+   git clone git@github.com:YOUR_ID/Git_Tutorial.git
    ```
 4. 进入项目目录：
    ```
